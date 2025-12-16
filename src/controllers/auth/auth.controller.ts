@@ -214,7 +214,7 @@ export const loginHandler = async (req: Request, res: Response) => {
     }
 };
 
-
+//REFRESH TOKEN HANDLER ENDPOINT
 export const refreshHandler = async (req: Request, res: Response) => {
     try {
         // 1. Get Token from HTTP-only Cookie
@@ -264,4 +264,12 @@ export const refreshHandler = async (req: Request, res: Response) => {
         // Handles expired or invalid JWT (e.g., signature mismatch)
         return res.status(401).json({ message: "Invalid or expired refresh token." });
     }
+};
+
+//LOGOUT ENDPOINT
+export const logoutHandler = (req: Request, res: Response) => {
+    // Clear the HTTP-only cookie by name and path
+    res.clearCookie("refreshToken", { path: "/" });
+
+    return res.status(200).json({ message: "Logged out successfully." });
 };
