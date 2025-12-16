@@ -1,4 +1,4 @@
-// src/lib/hash.ts
+
 import bcrypt from "bcryptjs";
 
 // Generates a hash from the raw password
