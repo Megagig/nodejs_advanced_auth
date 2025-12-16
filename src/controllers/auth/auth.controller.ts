@@ -6,6 +6,12 @@ import { registerSchema, loginSchema } from "./auth.schema"; // Zod validation s
 import jwt from "jsonwebtoken";
 import { sendEmail } from "../../lib/email";
 import { createAccessToken, createRefreshToken, verifyRefreshToken } from "../../lib/token";
+import crypto from 'crypto';
+
+
+function getAppBaseUrl(): string {
+    return `${process.env.APP_BASE_URL || "http://localhost:5000"}`;
+}
 
 
 export const registerHandler = async (req: Request, res: Response) => {
@@ -272,4 +278,107 @@ export const logoutHandler = (req: Request, res: Response) => {
     res.clearCookie("refreshToken", { path: "/" });
 
     return res.status(200).json({ message: "Logged out successfully." });
+};
+
+//Forgot Password Handler
+
+export const forgotPasswordHandler = async (req: Request, res: Response) => {
+    const email = (req.body.email as string)?.toLowerCase().trim();
+
+    if (!email) {
+        return res.status(400).json({ message: "Email is required." });
+    }
+    const normalizedEmail = email.toLowerCase();
+
+    try {
+        const user = await User.findOne({ email: normalizedEmail });
+
+        // SECURITY TRICK: Always return a generic success message
+        // to prevent malicious users from knowing if an email exists in the DB.
+        const genericSuccess = res.json({
+            message: "If an account with this email exists, we will send a reset link."
+        });
+
+        if (!user) {
+            return genericSuccess;
+        }
+
+        // 1. Generate Raw Token (Secure Random Bytes)
+        const rawToken = crypto.randomBytes(32).toString("hex");
+
+        // 2. Hash Token (Only store the hash in the DB, never the raw token)
+        const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+
+        // 3. Set Reset Fields on User Document
+        user.resetPasswordToken = tokenHash; // Store the secure hash
+        // Set a short expiry (15 minutes)
+        user.resetPasswordExpires = new Date(Date.now() + 15 * 60 * 1000);
+        await user.save();
+
+        // 4. Construct Reset URL (Use the RAW token here)
+        const resetURL = `${getAppBaseUrl()}/auth/reset-password?token=${rawToken}`;
+
+        // 5. Send Email
+        await sendEmail({
+            to: user.email,
+            subject: "Password Reset Request",
+            html: `<p>Click the link below to reset your password:</p>
+             <p><a href="${resetURL}">${resetURL}</a></p>`,
+        });
+
+        return genericSuccess;
+
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ message: "Internal server error." });
+    }
+};
+
+//Reset Password Handler
+export const resetPasswordHandler = async (req: Request, res: Response) => {
+    const { token, password } = req.body as { token: string, password: string };
+
+    if (!token) {
+        return res.status(400).json({ message: "Reset token is missing." });
+    }
+    if (!password || password.length < 6) {
+        return res.status(400).json({ message: "Password must be at least 6 characters long." });
+    }
+
+    try {
+        // 1. Hash the incoming token (the raw token from the URL)
+        const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+
+        // 2. Find User by Token Hash and Expiry Date
+        const user = await User.findOne({
+            resetPasswordToken: tokenHash, // Check if the token hash matches
+            resetPasswordExpires: { $gt: Date.now() }, // Check if the expiry date is in the future
+        });
+
+        if (!user) {
+            return res.status(400).json({ message: "Invalid or expired token." });
+        }
+
+        // 3. Hash New Password
+        const newPasswordHash = await hashPassword(password);
+
+        // 4. Update User Document
+        user.passwordHash = newPasswordHash;
+
+        // 5. Clear Reset Fields (Crucial: Token can only be used once)
+        user.resetPasswordToken = undefined;
+        user.resetPasswordExpires = undefined;
+
+        // 6. Invalidate all existing sessions (CRITICAL SECURITY STEP)
+        user.tokenVersion += 1; // Bump token version to invalidate all current refresh tokens
+
+        await user.save();
+
+        // 7. Success Response
+        return res.status(200).json({ message: "Password reset successfully." });
+
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ message: "Internal server error." });
+    }
 };
