@@ -98,3 +98,47 @@ export const registerHandler = async (req: Request, res: Response) => {
         return res.status(500).json({ message: "An unexpected server error occurred." });
     }
 };
+
+//The verifyEmailHandler (The Endpoint)
+
+// src/controllers/auth/auth.controller.ts
+export const verifyEmailHandler = async (req: Request, res: Response) => {
+    // Get token from the URL query parameters: /verify-email?token=...
+    const token = req.query.token as string | undefined;
+
+    if (!token) {
+        return res.status(400).json({ message: "Verification token is missing." });
+    }
+
+    try {
+        // 1. Verify the JWT Token
+        // Decrypts the token using the same secret key
+        const payload = jwt.verify(token, process.env.JWT_ACCESS_SECRET as string) as { sub: string };
+        const userId = payload.sub; // The user ID we stored in the token's 'sub' field
+
+        // 2. Find the User
+        const user = await User.findById(userId);
+
+        if (!user) {
+            return res.status(400).json({ message: "User not found or token invalid." });
+        }
+
+        // 3. Check Verification Status
+        if (user.isEmailVerified) {
+            // User is already verified, no action needed
+            return res.status(200).json({ message: "Email is already verified." });
+        }
+
+        // 4. Update the User Status
+        user.isEmailVerified = true; // Set the flag to true
+        await user.save(); // Save the updated document to MongoDB
+
+        // 5. Success Response
+        return res.status(200).json({ message: "Email is now verified. You can login." });
+
+    } catch (error) {
+        // This catch block handles JWT expiration or tampering errors
+        console.error("Verification error:", error);
+        return res.status(400).json({ message: "Invalid or expired verification token." });
+    }
+};
