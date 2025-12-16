@@ -67,7 +67,7 @@ export const registerHandler = async (req: Request, res: Response) => {
             return `${process.env.APP_BASE_URL || "http://localhost:5000"}`;
         }
 
-        const verifyURL = `${getAppBaseUrl()}/verify-email?token=${verifyToken}`;
+        const verifyURL = `${getAppBaseUrl()}/auth/verify-email?token=${verifyToken}`;
         // Final step of the registration logic
         // Call sendEmail
         await sendEmail({

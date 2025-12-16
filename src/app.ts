@@ -1,6 +1,7 @@
 import express from "express";
 import cookieParser from "cookie-parser";
 import dotenv from "dotenv";
+import authRoutes from "./routes/auth.routes";
 
 dotenv.config();
 
@@ -12,5 +13,8 @@ app.use(cookieParser());
 app.get("/health", (req, res) => {
     res.json({ status: "OK" });
 });
+
+//Register Routes in App
+app.use("/auth", authRoutes);
 
 export default app;
