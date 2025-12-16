@@ -10,3 +10,17 @@ export const registerSchema = z.object({
 
 // Export a TypeScript type generated from the Zod schema for strong typing
 export type RegisterInput = z.infer<typeof registerSchema>;
+
+
+
+// src/controllers/auth/auth.schema.ts
+
+// ... (registerSchema remains the same)
+
+export const loginSchema = z.object({
+    email: z.string().email("Invalid email format"),
+    password: z.string(), // No min length needed for login, just check if present
+});
+
+// Export a TypeScript type generated from the Zod schema
+export type LoginInput = z.infer<typeof loginSchema>;

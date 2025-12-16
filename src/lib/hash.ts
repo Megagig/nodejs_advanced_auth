@@ -13,3 +13,12 @@ export const hashPassword = async (password: string): Promise<string> => {
 
     return hashedPassword;
 };
+
+
+// src/lib/hash.ts
+// ... (hashPassword function remains the same)
+
+export const checkPassword = async (password: string, hash: string): Promise<boolean> => {
+    // bcrypt.compare compares the raw string against the stored hash
+    return bcrypt.compare(password, hash);
+};

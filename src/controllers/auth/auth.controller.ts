@@ -1,10 +1,11 @@
 // src/controllers/auth/auth.controller.ts
 import { Request, Response } from "express";
 import { User } from "../../models/user.model"; // Mongoose User model
-import { hashPassword } from "../../lib/hash"; // Custom hashing utility
-import { registerSchema } from "./auth.schema"; // Zod validation schema
+import { checkPassword, hashPassword } from "../../lib/hash"; // Custom hashing utility
+import { registerSchema, loginSchema } from "./auth.schema"; // Zod validation schema
 import jwt from "jsonwebtoken";
 import { sendEmail } from "../../lib/email";
+import { createAccessToken, createRefreshToken } from "../../lib/token";
 
 
 export const registerHandler = async (req: Request, res: Response) => {
@@ -140,5 +141,75 @@ export const verifyEmailHandler = async (req: Request, res: Response) => {
         // This catch block handles JWT expiration or tampering errors
         console.error("Verification error:", error);
         return res.status(400).json({ message: "Invalid or expired verification token." });
+    }
+};
+
+
+// Inside auth.controller.ts (excerpt)
+
+export const loginHandler = async (req: Request, res: Response) => {
+    try {
+        // 1. Validate Request Body (using loginSchema and safeParse)
+        const result = loginSchema.safeParse(req.body);
+
+        if (!result.success) {
+            return res.status(400).json({
+                message: "Invalid login data",
+            });
+        }
+
+        const { email, password } = result.data;
+        // Normalize email
+        const normalizedEmail = email.toLowerCase().trim();
+
+        // 2. Find User
+        const user = await User.findOne({ email: normalizedEmail });
+        if (!user) {
+            return res.status(400).json({ message: "Invalid email or password." });
+        }
+
+        // 3. Password Check (using the new checkPassword utility)
+        const isPasswordValid = await checkPassword(password, user.passwordHash);
+        if (!isPasswordValid) {
+            return res.status(400).json({ message: "Invalid email or password." });
+        }
+
+        // 4. Email Verification Check (Authorization/Access check)
+        if (!user.isEmailVerified) {
+            return res.status(403).json({
+                message: "Please verify your email before logging in."
+            });
+        }
+
+        // 5. Token Creation and Cookie Setting (Detailed below)
+        const accessToken = createAccessToken(user._id.toString(), user.role, user.tokenVersion);
+        const refreshToken = createRefreshToken(user._id.toString(), user.tokenVersion);
+
+        // Set Refresh Token in an HTTP-Only Cookie
+        res.cookie("refreshToken", refreshToken, {
+            httpOnly: true, // Prevents client-side JavaScript access (security!)
+            secure: process.env.NODE_ENV === "production", // Only use 'Secure' in prod (HTTPS)
+            sameSite: "lax",
+            maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days (as calculated in transcript)
+        });
+
+        // 6. Success Response
+        return res.status(200).json({
+            message: "Login successfully done.",
+            accessToken, // Sent back in the JSON response
+            user: {
+                id: user._id,
+                email: user.email,
+                role: user.role,
+                isEmailVerified: user.isEmailVerified,
+                twoFactorEnabled: user.twoFactorEnabled,
+            },
+        });
+
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({
+            message: "Internal server error",
+        });
     }
 };
