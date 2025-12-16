@@ -14,8 +14,6 @@ export const createAccessToken = (userId: string, role: "user" | "admin" = "user
 };
 
 //Refresh Token (Long-Lived)
-// src/lib/token.ts (excerpt)
-
 export const createRefreshToken = (userId: string, tokenVersion: number) => {
     const payload = { sub: userId, tokenVersion };
     return jwt.sign(
@@ -23,4 +21,13 @@ export const createRefreshToken = (userId: string, tokenVersion: number) => {
         process.env.JWT_REFRESH_SECRET as string,
         { expiresIn: "7d" } // Long-lived (e.g., 7 days)
     );
+};
+
+
+//JWT Verification Utility
+export const verifyRefreshToken = (token: string) => {
+    return jwt.verify(
+        token,
+        process.env.JWT_REFRESH_SECRET!// Use the Refresh Secret
+    ) as { sub: string, tokenVersion: number };
 };

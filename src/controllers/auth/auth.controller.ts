@@ -5,7 +5,7 @@ import { checkPassword, hashPassword } from "../../lib/hash"; // Custom hashing 
 import { registerSchema, loginSchema } from "./auth.schema"; // Zod validation schema
 import jwt from "jsonwebtoken";
 import { sendEmail } from "../../lib/email";
-import { createAccessToken, createRefreshToken } from "../../lib/token";
+import { createAccessToken, createRefreshToken, verifyRefreshToken } from "../../lib/token";
 
 
 export const registerHandler = async (req: Request, res: Response) => {
@@ -145,7 +145,7 @@ export const verifyEmailHandler = async (req: Request, res: Response) => {
 };
 
 
-// Inside auth.controller.ts (excerpt)
+// lOGIN ENDPOINT
 
 export const loginHandler = async (req: Request, res: Response) => {
     try {
@@ -211,5 +211,57 @@ export const loginHandler = async (req: Request, res: Response) => {
         return res.status(500).json({
             message: "Internal server error",
         });
+    }
+};
+
+
+export const refreshHandler = async (req: Request, res: Response) => {
+    try {
+        // 1. Get Token from HTTP-only Cookie
+        const token = req.cookies.refreshToken as string | undefined;
+
+        if (!token) {
+            return res.status(401).json({ message: "Refresh token missing." }); // Unauthorized
+        }
+
+        // 2. Verify Token and Get Payload
+        // Uses the dedicated refresh secret
+        const payload = verifyRefreshToken(token) as { sub: string, tokenVersion: number };
+
+        // 3. Find User by ID
+        const user = await User.findById(payload.sub);
+
+        if (!user) {
+            return res.status(401).json({ message: "User not found." });
+        }
+
+        // 4. Token Version Check (Token Invalidation) - CRITICAL SECURITY CHECK
+        // If the user's stored tokenVersion (bumped on password reset/logout) 
+        // does not match the tokenVersion inside the JWT payload, invalidate it.
+        if (user.tokenVersion !== payload.tokenVersion) {
+            return res.status(401).json({ message: "Refresh token invalidated." });
+        }
+
+        // 5. Generate New Tokens
+        const newAccessToken = createAccessToken(user._id.toString(), user.role, user.tokenVersion);
+        const newRefreshToken = createRefreshToken(user._id.toString(), user.tokenVersion);
+
+        // 6. Set New Refresh Token in Cookie (Rotate tokens)
+        res.cookie("refreshToken", newRefreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "lax",
+            maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+        });
+
+        // 7. Success Response
+        return res.status(200).json({
+            message: "Token refreshed.",
+            accessToken: newAccessToken
+        });
+
+    } catch (error) {
+        // Handles expired or invalid JWT (e.g., signature mismatch)
+        return res.status(401).json({ message: "Invalid or expired refresh token." });
     }
 };
