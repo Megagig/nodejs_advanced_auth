@@ -8,6 +8,8 @@ dotenv.config();
 
 const app = express();
 
+app.set("trust proxt", 1);
+
 app.use(express.json());
 app.use(cookieParser());
 
