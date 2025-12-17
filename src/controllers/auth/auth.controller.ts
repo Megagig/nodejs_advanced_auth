@@ -8,6 +8,7 @@ import { sendEmail } from "../../lib/email";
 import { createAccessToken, createRefreshToken, verifyRefreshToken } from "../../lib/token";
 import crypto from 'crypto';
 import { getGoogleClient } from "../../lib/googleClient";
+import { authenticator } from "otplib";
 
 
 function getAppBaseUrl(): string {
@@ -165,7 +166,7 @@ export const loginHandler = async (req: Request, res: Response) => {
             });
         }
 
-        const { email, password } = result.data;
+        const { email, password, twoFactorCode } = result.data;
         // Normalize email
         const normalizedEmail = email.toLowerCase().trim();
 
@@ -187,6 +188,33 @@ export const loginHandler = async (req: Request, res: Response) => {
                 message: "Please verify your email before logging in."
             });
         }
+
+        //TOW FACTOR GUARD
+        if (user.twoFactorEnabled) {
+            if (!twoFactorCode || typeof twoFactorCode !== 'string') {
+                return res.status(400).json({
+                    message: "Two-factor code is required",
+                });
+            }
+
+            if (!user.twoFactorSecret) {
+                return res.status(400).json({
+                    message: "Two-factor misconfigured for this account",
+                });
+            }
+            // verify the code using otplib
+            const isValidCode = authenticator.check(
+                twoFactorCode,
+                user.twoFactorSecret
+            );
+
+            if (!isValidCode) {
+                return res.status(400).json({
+                    message: "Invalid two-factor code",
+                });
+            }
+        }
+
 
         // 5. Token Creation and Cookie Setting (Detailed below)
         const accessToken = createAccessToken(user._id.toString(), user.role, user.tokenVersion);
@@ -510,7 +538,115 @@ export async function googleOAuthCallbackHandler(
     }
 }
 
+//SETUP 2FA ENDPOINT
 
+export async function setupTwoFactorHandler(
+    req: Request,
+    res: Response
+) {
+
+    const authReq = req as any
+    const authUser = authReq.user
+    if (!authUser) {
+        return res.status(401).json({
+            message: "User not authenticated",
+        });
+    }
+
+    try {
+        const user = await User.findById(authUser.id);
+
+        if (!user) {
+            return res.status(404).json({
+                message: "User not found",
+            });
+        }
+
+        const secret = authenticator.generateSecret();
+
+        const issuer = "Node-Advanced-App";
+
+        const otpAuthUrl = authenticator.keyuri(
+            user.email,
+            issuer,
+            secret
+        );
+
+        user.twoFactorSecret = secret;
+        user.twoFactorEnabled = false; // IMPORTANT
+        await user.save();
+
+        res.json({
+            message: "Two-factor setup initiated",
+            otpAuthUrl,
+            secret, // for testing only
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            message: "Failed to setup two-factor authentication",
+        });
+    }
+}
+
+//VERIFY 2FA SETUP
+export async function verifyTwoFactorHandler(
+    req: Request,
+    res: Response
+) {
+    const authReq = req as any
+    const authUser = authReq.user
+    if (!authUser) {
+        return res.status(401).json({
+            message: "Not authenticated"
+        });
+    }
+    const { code } = req.body as { code?: string }
+    if (!code) {
+        return res.status(400).json({
+            message: "Two factor code is required",
+        });
+    }
+    try {
+        const user = await User.findById(authUser.id);
+
+        if (!user) {
+            return res.status(404).json({
+                message: "User not found",
+            });
+        }
+
+        if (!user.twoFactorSecret) {
+            return res.status(400).json({
+                message: "Two-factor setup not completed",
+            });
+        }
+
+        const isValid = authenticator.check(
+            code,
+            user.twoFactorSecret
+        );
+
+        if (!isValid) {
+            return res.status(400).json({
+                message: "Invalid two-factor code",
+            });
+        }
+
+        user.twoFactorEnabled = true;
+        await user.save();
+
+        res.json({
+            message: "Two-factor authentication enabled successfully",
+            twoFactorEnabled: true,
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            message: "Failed to verify two-factor authentication",
+        });
+    }
+}
 
 
 

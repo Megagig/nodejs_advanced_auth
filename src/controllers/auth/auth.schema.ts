@@ -20,6 +20,7 @@ export type RegisterInput = z.infer<typeof registerSchema>;
 export const loginSchema = z.object({
     email: z.string().email("Invalid email format"),
     password: z.string(), // No min length needed for login, just check if present
+    twoFactorCode: z.string().optional(),
 });
 
 // Export a TypeScript type generated from the Zod schema

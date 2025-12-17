@@ -9,7 +9,10 @@ import {
     resetPasswordHandler,
     googleOAuthStartHandler,
     googleOAuthCallbackHandler,
+    setupTwoFactorHandler,
+    verifyTwoFactorHandler,
 } from "../controllers/auth/auth.controller";
+import { requireAuth } from "../middlewares/requireAuth";
 
 const router = Router();
 
@@ -25,6 +28,18 @@ router.get(
     "/google/callback",
     googleOAuthCallbackHandler
 );
+router.post(
+    "/2fa/setup",
+    requireAuth,
+    setupTwoFactorHandler
+);
+router.post(
+    "/2fa/verify",
+    requireAuth,
+    verifyTwoFactorHandler
+);
+
+
 
 
 
