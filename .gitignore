@@ -9,3 +9,4 @@
 .augment/rules/byterover-rules.md
 
 node_modules
+.env
