@@ -7,6 +7,7 @@ import jwt from "jsonwebtoken";
 import { sendEmail } from "../../lib/email";
 import { createAccessToken, createRefreshToken, verifyRefreshToken } from "../../lib/token";
 import crypto from 'crypto';
+import { getGoogleClient } from "../../lib/googleClient";
 
 
 function getAppBaseUrl(): string {
@@ -382,3 +383,141 @@ export const resetPasswordHandler = async (req: Request, res: Response) => {
         return res.status(500).json({ message: "Internal server error." });
     }
 };
+
+//Google Authentication
+export async function googleOAuthStartHandler(
+    req: Request,
+    res: Response
+) {
+    try {
+        const client = getGoogleClient();
+
+        const url = client.generateAuthUrl({
+            access_type: "offline",
+            prompt: "consent",
+            scope: [
+                "openid",
+                "email",
+                "profile",
+            ],
+        });
+
+        res.redirect(url);
+    } catch (error) {
+        res.status(500).json({
+            message: "Could not start Google OAuth",
+        });
+    }
+}
+
+//Google OAuth Callback Handler
+
+export async function googleOAuthCallbackHandler(
+    req: Request,
+    res: Response
+) {
+    const code = req.query.code as string | undefined;
+
+    if (!code) {
+        return res.status(400).json({
+            message: "Authorization code missing",
+        });
+    }
+
+    try {
+        const client = getGoogleClient();
+        // 1. Exchange the code for tokens
+        const { tokens } = await client.getToken(code);
+
+        if (!tokens.id_token) {
+            return res.status(400).json({
+                message: "Google ID token missing",
+            });
+        }
+        // 2. Verify the ID Token to get user profile info
+        const ticket = await client.verifyIdToken({
+            idToken: tokens.id_token,
+            audience: process.env.GOOGLE_CLIENT_ID,
+        });
+
+        const payload = ticket.getPayload(); // Contains email, name, picture, etc.
+
+        if (!payload?.email || !payload.email_verified) {
+            return res.status(400).json({
+                message: "Google email not verified",
+            });
+        }
+
+        const email = payload.email.toLowerCase().trim();
+
+        // 3. Find or Create the User in our DB
+        let user = await User.findOne({ email });
+
+        if (user) {
+            // If user exists but wasn't verified, mark as true (Google verified them)
+            if (!user.isEmailVerified) {
+                user.isEmailVerified = true;
+                await user.save();
+            }
+        } else {
+            // Create a new user with a random password since they use Google
+            const randomPassword = crypto.randomBytes(16).toString("hex");
+            const passwordHash = await hashPassword(randomPassword);
+
+            user = await User.create({
+                email,
+                passwordHash,
+                role: "user",
+                isEmailVerified: true, // Auto-verified via Google
+                twoFactorEnabled: false,
+            });
+
+        }
+        //  4. Generate our own JWT Access / Refresh tokens
+        const accessToken = createAccessToken(
+            user._id.toString(),
+            user.role,
+            user.tokenVersion
+        );
+
+        const refreshToken = createRefreshToken(
+            user._id.toString(),
+            user.tokenVersion
+        );
+        // 5. Set Refresh Token in Cookie
+        res.cookie("refreshToken", refreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "lax",
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+        });
+        // 6. Success! Return data to frontend
+        res.json({
+            message: "Google login successful",
+            accessToken,
+            user: {
+                id: user._id,
+                email: user.email,
+                role: user.role,
+                isEmailVerified: user.isEmailVerified,
+            },
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            message: "Google authentication failed",
+        });
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
